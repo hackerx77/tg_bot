@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
+from telegram.error import NetworkError 
 from telegram.ext import (
     Application, CallbackQueryHandler, CommandHandler, ContextTypes,
     MessageHandler, filters,
@@ -450,8 +451,13 @@ async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Buyruqlar ro'yxati: /start")
 
 
-async def on_error(update, context: ContextTypes.DEFAULT_TYPE):
+async def on_error (update, context: ContextTypes.DEFAULT_TYPE):
+    if isinstance(context.error, NetworkError):
+        log.warning("Tarmoq uzilishi, bot o'zi qayta urinadi")
+        return
+    
     log.error("Kutilmagan xato", exc_info=context.error)
+    
     try:
         await context.bot.send_message(config.ADMIN_ID, f"⚠️ Bot xatosi: {type(context.error).__name__}")
     except Exception:
@@ -475,7 +481,13 @@ def main():
         sys.exit("XATO: DAILY_TIME (masalan 08:00) yoki TIMEZONE noto'g'ri.")
 
     db.init()
-    app = Application.builder().token(config.BOT_TOKEN).build()
+    app = (
+    Application.builder()
+    .token(config.BOT_TOKEN)
+    .connect_timeout(30).read_timeout(30).write_timeout(30).pool_timeout(30)
+    .get_updates_connect_timeout(30).get_updates_read_timeout(30)
+    .build()
+)
     if app.job_queue is None:
         sys.exit("XATO: python -m pip install -r requirements.txt ni qayta ishga tushiring (job-queue kerak).")
 
@@ -491,7 +503,7 @@ def main():
 
     app.job_queue.run_daily(daily_job, time=dt.time(hh, mm, tzinfo=tz), name="daily")
     log.info("Bot ishga tushdi. Kunlik tekshiruv: %s (%s)", config.DAILY_TIME, config.TZ)
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    app.run_polling(allowed_updates=Update.ALL_TYPES, bootstrap_retries=-1)
 
 
 if __name__ == "__main__":
